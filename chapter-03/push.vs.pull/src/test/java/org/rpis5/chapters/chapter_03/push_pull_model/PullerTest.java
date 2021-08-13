@@ -23,7 +23,7 @@ public class PullerTest {
 
 			      @Override
 			      public void onSubscribe(Subscription s) {
-				      s.request(Long.MAX_VALUE);
+				      s.request(Long.MAX_VALUE); // upstream(TaskFilterInner(Subscription))의 request 호출(155번 라인)
 			      }
 
 			      @Override

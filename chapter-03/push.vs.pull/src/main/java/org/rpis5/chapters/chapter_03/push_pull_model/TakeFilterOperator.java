@@ -23,6 +23,8 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 	}
 
 	public void subscribe(Subscriber s) {
+		// upstream(AsyncDatabaseClient)의 subscribe 호출
+		// upstream의 subscribe에서는 TaskFilterInner의 onSubscribe를 호출
 		source.subscribe(new TakeFilterInner<>(s, take, predicate));
 	}
 
@@ -55,13 +57,17 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			this.queue = new ConcurrentLinkedQueue<>();
 		}
 
-		public void onSubscribe(Subscription current) {
+
+		public void onSubscribe(Subscription current) { // upstream(AsyncDatabaseClient.subscribe)에서 호출
 			if (this.current == null) {
 				this.current = current;
 
+				// downstream(PullerTest)의 onSubscribe 호출
+				// -> TakeFilterInner의 request 호출(queue에 남아있는 데이터 전달)
 				this.actual.onSubscribe(this);
 				if (take > 0) {
-					this.current.request(take);
+					// upstream(AsyncDatabaseClient에서 생성한 Subscription) 호출(db에서 새로운 데이터 가져옴)
+					this.current.request(take); // 이후 80번 라인의 onNext 호출(db에서 가져온 데이터를 다시 downstream에 전달)
 				} else {
 					onComplete();
 				}
@@ -71,7 +77,7 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			}
 		}
 
-		public void onNext(T element) {
+		public void onNext(T element) { // upstream(AsyncDatabaseClient 에서 생성한 Subscription)의 request에서 호출
 			if (done) {
 				return;
 			}
@@ -80,17 +86,18 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			Subscriber<T> a = actual;
 			Subscription s = current;
 
+			// remaining 깎아가면서 조건에 충족하는 요소만 downstream(PullerTest)으로 전달
 			if (remaining > 0) {
 				boolean isValid = predicate.test(element);
 				boolean isEmpty = queue.isEmpty();
 
 				if (isValid && r > 0 && isEmpty) {
-					a.onNext(element);
+					a.onNext(element); // downstream(PullerTest)의 onNext 호출
 					remaining--;
 
 					REQUESTED.decrementAndGet(this);
 					if (remaining == 0) {
-						s.cancel();
+						s.cancel(); // upstream(AsyncDatabaseClient.Subscription)의 cancel 호출
 						onComplete();
 					}
 				}
@@ -99,8 +106,8 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 					remaining--;
 
 					if (remaining == 0) {
-						s.cancel();
-						onComplete();
+						s.cancel(); // upstream(AsyncDatabaseClient.Subscription)의 cancel 호출
+						onComplete(); // 완료되면 downstream(PullerTest)의 onComplete 호출
 					}
 					drain(a, r);
 				}
@@ -113,8 +120,9 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 				onComplete();
 			}
 
+			// 요청한(70라인) 요소의 반 정도 소비했을 때 upstream(AsyncDatabaseClient)에 추가 데이터 요청
 			if (filtered > 0 && remaining / filtered < 2) {
-				s.request(take);
+				s.request(take); // upstream(AsyncDatabaseClient.Subscription)의 request 호출
 				filtered = 0;
 			}
 		}
@@ -128,7 +136,7 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			done = true;
 
 			if (queue.isEmpty()) {
-				actual.onError(t);
+				actual.onError(t); // downstream(PullerTest)의 onError 호출
 			}
 			else {
 				throwable = t;
@@ -144,7 +152,7 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			done = true;
 
 			if (queue.isEmpty()) {
-				actual.onComplete();
+				actual.onComplete(); // downstream(PullerTest)의 onComplete 호출
 			}
 		}
 
@@ -168,6 +176,7 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			queue.clear();
 		}
 
+		// queue에 남아있으면 downstream(PullerTest)에 전달
 		void drain(Subscriber<T> a, long r) {
 			if (queue.isEmpty() || r == 0) {
 				return;
@@ -185,7 +194,7 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			for (;;) {
 				T e;
 				while (c != r && (e = queue.poll()) != null) {
-					a.onNext(e);
+					a.onNext(e); // downstream(PullerTest)의 onNext 호출
 					c++;
 				}
 
