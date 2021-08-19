@@ -57,8 +57,10 @@ public class TakeFilterOperator<T> implements Publisher<T> {
 			this.queue = new ConcurrentLinkedQueue<>();
 		}
 
-
-		public void onSubscribe(Subscription current) { // upstream(AsyncDatabaseClient.subscribe)에서 호출
+		// publisher(upstream)에서 onSubscribe를 호출하거나 subscriber가 downstream onSubscribe를 호출하거나
+		// TakeFilterInner subscriber를 TakeFilterOperator.source.subscribe에 던졌기 때문에
+		// upstream(AsyncDatabaseClient.subscribe)에서 이 메서드 호출
+		public void onSubscribe(Subscription current) { // publisher(AsyncDatabaseClient)에서 전달한 Subscription
 			if (this.current == null) {
 				this.current = current;
 

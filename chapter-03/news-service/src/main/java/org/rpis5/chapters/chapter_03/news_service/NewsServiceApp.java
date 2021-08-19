@@ -85,7 +85,7 @@ public class NewsServiceApp {
     }
 
     @Bean
-    DatabaseNewsService databaseNews() {
+    DatabaseNewsService databaseNews() { // mongodb에서 데이터를 읽어오는 publisher를 반환해주는 bean 생성(reactivestream)
         return () -> client.getDatabase("news")
                            .getCollection("news")
                            .find(News.class)
@@ -94,7 +94,7 @@ public class NewsServiceApp {
     }
 
     @Bean
-    HttpNewsService externalNews() {
+    HttpNewsService externalNews() { // 외부에서 데이터를 읽어오는 observable를 반환해주는 bean 생성(rxjava)
         return () -> HttpClient.newClient(new InetSocketAddress(NEWS_SERVER_PORT))
                                .createGet("")
                                .flatMap(HttpClientResponse::getContent)
@@ -195,7 +195,6 @@ public class NewsServiceApp {
     }
 
     private interface HttpNewsService {
-
         Observable<News> retrieveNews();
     }
 }

@@ -33,7 +33,7 @@ public class SmartMulticastProcessor implements Processor<NewsLetter, NewsLetter
 
 		InnerSubscription s = new InnerSubscription(actual, this);
 
-		if (add(s)) {
+		if (add(s)) { // 구독자 수 만큼 subscription을 생성하여 저장
 			actual.onSubscribe(s);
 		}
 		else {
@@ -53,7 +53,7 @@ public class SmartMulticastProcessor implements Processor<NewsLetter, NewsLetter
 		Objects.requireNonNull(s);
 
 		if (UPSTREAM.compareAndSet(this, null, s)) {
-			s.request(Long.MAX_VALUE);
+			s.request(Long.MAX_VALUE); // SchedulerMainSubscription.request 호출
 		}
 		else {
 			s.cancel();

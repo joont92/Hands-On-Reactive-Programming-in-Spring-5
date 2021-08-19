@@ -24,7 +24,7 @@ public class NewsPreparationOperator implements Publisher<NewsLetter> {
 
     @Override
     public void subscribe(Subscriber<? super NewsLetter> s) {
-        upstream.subscribe(new NewsPreparationInner(s, title));
+        upstream.subscribe(new NewsPreparationInner(s, title)); // DBPublisher(upstream)이 NewsPreparationInner.onSubscribe 호출
     }
 
     final static class NewsPreparationInner implements Subscription, Subscriber<News> {
@@ -52,11 +52,11 @@ public class NewsPreparationOperator implements Publisher<NewsLetter> {
         }
 
         @Override
-        public void onSubscribe(Subscription s) {
+        public void onSubscribe(Subscription s) { // DbPublisher에서 호출
             if (this.s == null) {
                 this.s = s;
-                actual.onSubscribe(this);
-                s.request(Long.MAX_VALUE);
+                actual.onSubscribe(this); // SchedulerInnerSubscriber의 onSubscribe 호출
+                s.request(Long.MAX_VALUE); // DBPublisher에 데이터 요청
             }
             else {
                 s.cancel();

@@ -14,9 +14,9 @@ public class NewsServicePublisher implements Publisher<NewsLetter> {
 	final SmartMulticastProcessor processor;
 
 	public NewsServicePublisher(MongoClient client, String categoryOfInterests) {
-		ScheduledPublisher<NewsLetter> scheduler = new ScheduledPublisher<>(
-				() -> new NewsPreparationOperator(
-						new DBPublisher(
+		ScheduledPublisher<NewsLetter> scheduler = new ScheduledPublisher<>( // third upstream
+				() -> new NewsPreparationOperator( // second upstream
+						new DBPublisher( // first upstream
 								client.getDatabase("news")
 								      .getCollection("news", News.class),
 								categoryOfInterests

@@ -39,10 +39,16 @@ public class ScheduledPublisher<T> implements Publisher<T> {
 	    this.publisherCallable = publisherCallable;
     }
 
+	// Subscriber에게 Subscription을 전달하고, 생성자로 받았던 publisher를 scheduling하여 실행
     @Override
     public void subscribe(Subscriber<? super T> actual) {
-	    SchedulerMainSubscription<T> s = new SchedulerMainSubscription<>(actual, publisherCallable);
+		SchedulerMainSubscription<T> s = new SchedulerMainSubscription<>(actual, publisherCallable);
+	    // SmartMulticastProcessor의 onSubscribe 호출
+		// ScheduledPublisher -> SmartMulticastProcessor -> ScheduledPublisher.SchedulerMainSubscription
+		// request 횟수 기록?(onNext는 호출하지 않음)
 	    actual.onSubscribe(s);
+
+		// 일정 시간마다 run 함수 실행(생성자로 받았던 publisher)
 	    s.setScheduledFuture(
             scheduledExecutorService.scheduleWithFixedDelay(s, 0, period, unit)
 	    );
@@ -96,8 +102,17 @@ public class ScheduledPublisher<T> implements Publisher<T> {
 	    public void run() {
 		    if (!cancelled) {
 			    try {
-				    Publisher<T> innerPublisher = Objects.requireNonNull(publisherCallable.call());
+					// NewsPreparationOperator가 DBPublisher로 부터 뉴스레터를 받은 뒤, 집계가 되면 SchedulerInnerSubscriber 호출하고, SchedulerInnerSubscriber는 SmartMulticastProcessor 호출
+				    Publisher<T> innerPublisher = Objects.requireNonNull(publisherCallable.call()); // NewsPreperationOperator
 				    if (requested == Long.MAX_VALUE) {
+						// 전달받은 SmartMulticastProcessor가 아닌 SchedulerInnerSubscriber를 NewsPreparationOperator에 전달
+						// NewsPreparationOperator에서 NewsPreparationInner subscriber 추가해서 DBPublisher에 전달
+						// DBPublisher에서 NewsPreparationInner의 onSubscriber 호출
+
+						// 1. DBPublisher -> NewsPreparationInner.onSubscribe -> SchedulerInnerSubscriber.onSubscribe
+						// 2. SchedulerInnerSubscriber에서 NewsPreparationInner.request 호출 -> queue에 남아있을 경우 SchedulerInnerSubscriber.onNext 호출
+						// 3. NewsPreparationInner.onSubscribe에서 dbPublisher.request 호출 -> NewsPreparationInner.onNext 호출: queue에 쌓음
+						// 4. queue에 데이터가 다 쌓였을 경우 SchedulerInnerSubscriber.onNext 호출 -> SmartMulticastProcessor.onNext 호출
 					    innerPublisher.subscribe(new FastSchedulerInnerSubscriber<>(this));
 				    }
 				    else {
@@ -139,7 +154,7 @@ public class ScheduledPublisher<T> implements Publisher<T> {
 	    void emit(T e) {
 		    Subscriber<? super T> a = this.actual;
 
-		    a.onNext(e);
+		    a.onNext(e); // SmartMulticastProcessor의 onNext 호출
 	    }
 
 
@@ -162,7 +177,7 @@ public class ScheduledPublisher<T> implements Publisher<T> {
 	    public void onSubscribe(Subscription s) {
 	    	if (this.s == null) {
 			    this.s = s;
-			    s.request(Long.MAX_VALUE);
+			    s.request(Long.MAX_VALUE); // NewsPreparationInner.request 호출
 		    } else {
 	    		s.cancel();
 		    }
@@ -192,6 +207,7 @@ public class ScheduledPublisher<T> implements Publisher<T> {
 	    		return;
 		    }
 
+			// SchedulerMainSubscription.parent -> SchedulerMainSubscription.request
 		    parent.emit(t);
 	    }
     }
