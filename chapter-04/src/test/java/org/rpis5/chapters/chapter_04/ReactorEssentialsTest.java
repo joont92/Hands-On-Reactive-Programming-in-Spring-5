@@ -6,45 +6,45 @@ import org.junit.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+import org.springframework.util.StopWatch;
 import reactor.core.Disposable;
 import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.ConnectableFlux;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.Optional;
-import java.util.Random;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
 
 @Slf4j
 public class ReactorEssentialsTest {
-
+    private final StopWatch sw = new StopWatch();
     private final Random random = new Random();
 
     @Test
     @Ignore
     public void endlessStream() {
-        Flux.interval(Duration.ofMillis(1))
+        Flux.interval(Duration.ofMillis(1)) // 별도 쓰레드 생성
             .collectList()
-            .block();
+            .block(); // subscribe 해버림
     }
 
     @Test
-    @Ignore
+//    @Ignore
     public void endlessStream2() {
         Flux.range(1, 5)
-            .repeat()
+            .repeat() // range(1, 5) 무한반복
             .doOnNext(e -> log.info("E: {}", e))
             .take(100)
             .blockLast();
@@ -94,7 +94,7 @@ public class ReactorEssentialsTest {
     @Test
     public void emptyOrError() {
         Flux<String> empty = Flux.empty();
-        Mono<String> error = Mono.error(new RuntimeException("Unknown id"));
+        Mono<String> error = Mono.error(new RuntimeException("Unknown id")); // subscribe 하지 않으면 에러 발생 X
     }
 
     @Test
@@ -151,6 +151,20 @@ public class ReactorEssentialsTest {
     }
 
     @Test
+    public void simpleSubscribe2() {
+        Flux.range(1, 10)
+            .subscribe(
+                System.out::println,
+                errorIgnored -> {
+                },
+                () -> System.out.println("Done"),
+                s -> {
+                    s.request(3);
+                    s.cancel();
+                });
+    }
+
+    @Test
     public void mySubscriber() {
         Flux.just("A", "B", "C")
             .subscribe(new MySubscriber<>());
@@ -165,6 +179,7 @@ public class ReactorEssentialsTest {
     @Test
     public void shouldCreateDefer() {
         Mono<User> userMono = requestUserData(null);
+
         StepVerifier.create(userMono)
             .expectNextCount(0)
             .expectErrorMessage("Invalid user id")
@@ -178,40 +193,54 @@ public class ReactorEssentialsTest {
         Flux<Long> streamOfData = Flux.interval(Duration.ofMillis(100));
 
         streamOfData
-            .skipUntilOther(startCommand)
-            .takeUntilOther(stopCommand)
+            .skipUntilOther(startCommand) // 1초 뒤 시작
+            .takeUntilOther(stopCommand) // 3초간 subscribe TODO 이해가안감
             .subscribe(System.out::println);
 
         Thread.sleep(4000);
     }
 
     @Test
+    public void indexElements() {
+        Flux.range(2018, 5)
+                .timestamp()
+                .index() // t1 = index, t2 = (currentTimeMillis, integer)
+                .subscribe(e -> log.info("index: {}, ts: {}, value: {}",
+                        e.getT1(),
+                        Instant.ofEpochMilli(e.getT2().getT1()),
+                        e.getT2().getT2()));
+    }
+
+    @Test
     public void collectSort() {
         Flux.just(1, 6, 2, 8, 3, 1, 5, 1)
-            .collectSortedList(Comparator.reverseOrder())
+            .collectSortedList(Comparator.reverseOrder()) // list로 반환해야 하므로 원소를 다 돌아야 함
             .subscribe(System.out::println);
     }
 
     @Test
-    public void indexElements() {
-        Flux.range(2018, 5)
-            .timestamp()
-            .index()
-            .subscribe(e -> log.info("index: {}, ts: {}, value: {}",
-                e.getT1(),
-                Instant.ofEpochMilli(e.getT2().getT1()),
-                e.getT2().getT2()));
+    public void distinct() {
+        Flux.just(1, 1, 2, 2, 3, 3, 4, 4, 5, 5)
+            .distinct() // onNext publish한 원소들을 저장해둠
+            .subscribe(e -> log.info("onNext: {}", e));
     }
 
     @Test
     public void findingIfThereIsEvenElements() {
         Flux.just(3, 5, 7, 9, 11, 15, 16, 17)
-            .any(e -> e % 2 == 0)
+            .any(e -> e % 2 == 0) // predicate 만족하는 데이터를 찾으면 바로 종료
             .subscribe(hasEvens -> log.info("Has evens: {}", hasEvens));
     }
 
     @Test
     public void reduceExample() {
+        Flux.range(1, 5)
+            .reduce(0, (acc, elem) -> acc + elem) // onNext에서 reduce하고, onComplete에서 actual.onNext 호출
+            .subscribe(result -> log.info("Result: {}", result));
+    }
+
+    @Test
+    public void scanExample() {
         Flux.range(1, 5)
             .scan(0, (acc, elem) -> acc + elem)
             .subscribe(result -> log.info("Result: {}", result));
@@ -221,10 +250,10 @@ public class ReactorEssentialsTest {
     public void runningAverageExample() {
         int bucketSize = 5;
         Flux.range(1, 500)
-            .index()
+            .index() // Tuple(index, Integer)
             .scan(
                 new int[bucketSize],
-                (acc, elem) -> {
+                (acc, elem) -> { // acc : int[], elem : Tuple
                     acc[(int) (elem.getT1() % bucketSize)] = elem.getT2();
                     return acc;
                 })
@@ -241,25 +270,97 @@ public class ReactorEssentialsTest {
     }
 
     @Test
-    public void combineLatestOperator() {
+    public void concatOperator() throws InterruptedException {
+        // 3초+ 걸림
+        sw.start();
         Flux.concat(
-            Flux.range(1, 3),
-            Flux.range(4, 2),
-            Flux.range(6, 5)
-        ).subscribe(e -> log.info("onNext: {}", e));
+            // Mono.fromCompletable
+            Mono.just(1).delayElement(Duration.ofSeconds(1)),
+            Mono.just(2).delayElement(Duration.ofSeconds(1)),
+            Mono.just(3).delayElement(Duration.ofSeconds(1)))
+            .doOnNext(e -> log.info("onNext: {}", e))
+            .doOnComplete(() -> {
+                sw.stop();
+                log.info("concat2 total time: {}", sw.getTotalTimeMillis());
+            }).subscribe();
+        Thread.sleep(4000);
+    }
+
+    @Test
+    public void mergeOperator() throws InterruptedException {
+        // 1초+ 걸림, 순서가 다름
+        sw.start();
+        Flux.merge(
+            Mono.just(1).delayElement(Duration.ofSeconds(1)),
+            Mono.just(2).delayElement(Duration.ofSeconds(1)),
+            Mono.just(3).delayElement(Duration.ofSeconds(1)))
+            .doOnNext(e -> log.info("onNext: {}", e))
+            .doOnComplete(() -> {
+                sw.stop();
+                log.info("merge total time: {}", sw.getTotalTimeMillis());
+            }).subscribe();
+        Thread.sleep(2000);
+
+        // merge보다 조금 더 걸림, 대신 순서가 같음
+        sw.start();
+        Flux.mergeSequential(
+                Mono.just(1).delayElement(Duration.ofSeconds(1)),
+                Mono.just(2).delayElement(Duration.ofSeconds(1)),
+                Mono.just(3).delayElement(Duration.ofSeconds(1)))
+            .doOnNext(e -> log.info("onNext: {}", e))
+            .doOnComplete(() -> {
+                sw.stop();
+                log.info("merge total time: {}", sw.getTotalTimeMillis());
+            }).subscribe();
+        Thread.sleep(2000);
+    }
+
+    @Test
+    public void zipOperator() throws InterruptedException {
+        sw.start();
+        Flux.zip(
+            Mono.just(1).delayElement(Duration.ofSeconds(1)),
+            Mono.just(2).delayElement(Duration.ofSeconds(1)),
+            Mono.just(3).delayElement(Duration.ofSeconds(1)))
+            .doOnNext(e -> log.info("onNext: {}, {}, {}", e.getT1(), e.getT2(), e.getT3()))
+            .doOnComplete(() -> {
+                sw.stop();
+                log.info("zip total time: {}", sw.getTotalTimeMillis());
+            }).subscribe();
+        Thread.sleep(2000);
+    }
+
+    @Test
+    public void zipWithIterableOperator() throws InterruptedException {
+        sw.start();
+        Flux.zip(Arrays.asList(
+            Mono.delay(Duration.ofSeconds(1)),
+            Mono.delay(Duration.ofSeconds(1)),
+            Mono.delay(Duration.ofSeconds(1))),
+                it -> Arrays.stream(it).mapToLong(o -> (long) o).sum())
+            .doOnNext(e -> log.info("onNext: {}", e))
+            .doOnComplete(() -> {
+                sw.stop();
+                log.info("zip total time: {}", sw.getTotalTimeMillis());
+            }).subscribe();
+        Thread.sleep(2000);
     }
 
     @Test
     public void bufferBySize() {
         Flux.range(1, 13)
-            .buffer(4)
+            .buffer(4) // size buffer
+            .subscribe(e -> log.info("onNext: {}", e));
+
+        Flux.range(1, 13)
+            .bufferUntil(i -> i % 2 == 0) // predicate buffer
             .subscribe(e -> log.info("onNext: {}", e));
     }
 
     @Test
     public void windowByPredicate() {
         Flux<Flux<Integer>> fluxFlux = Flux.range(101, 20)
-            .windowUntil(this::isPrime, true);
+            .windowUntil(this::isPrime);
 
         fluxFlux.subscribe(window -> window
             .collectList()
@@ -295,8 +396,20 @@ public class ReactorEssentialsTest {
 
     @Test
     public void flatMapExample() throws InterruptedException {
+        // 순서보장 X
         Flux.just("user-1", "user-2", "user-3")
-            .flatMap(u -> requestBooks(u)
+            .flatMap(u -> requestBooks(u) // "book-*" 이름 기준으로 정렬
+                .map(b -> u + "/" + b))
+            .subscribe(r -> log.info("onNext: {}", r));
+
+        Thread.sleep(1000);
+    }
+
+    @Test
+    public void concatMapExample() throws InterruptedException {
+        // 순서보장 O
+        Flux.just("user-1", "user-2", "user-3")
+            .concatMap(u -> requestBooks(u) // upstream의 순서를 따라감
                 .map(b -> u + "/" + b))
             .subscribe(r -> log.info("onNext: {}", r));
 
